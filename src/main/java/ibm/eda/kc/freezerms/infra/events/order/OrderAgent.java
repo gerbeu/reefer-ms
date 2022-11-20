@@ -77,7 +77,7 @@ public class OrderAgent {
         final ObjectWriter ow = new ObjectMapper().writer().withDefaultPrettyPrinter();
         try {
             final String orderEventJson = ow.writeValueAsString(orderEvent);
-            span.setAttribute("processed.order.event", orderEventJson);
+            span.setAttribute("processed.event", orderEventJson);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         } finally {

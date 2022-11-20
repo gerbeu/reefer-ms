@@ -52,7 +52,7 @@ public class ReeferEventProducer {
         final ObjectWriter ow = new ObjectMapper().writer().withDefaultPrettyPrinter();
         try {
             final String reeferEventJson = ow.writeValueAsString(reeferEvent);
-            span.setAttribute("produced.reefer.event", reeferEventJson);
+            span.setAttribute("produced.event", reeferEventJson);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         } finally {

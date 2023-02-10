@@ -45,38 +45,48 @@ public class OrderAgent {
     ReeferEventProducer reeferEventProducer;
 
     @Incoming("orders")
-    public CompletionStage<Void> processOrder(Message<OrderEvent> messageWithOrderEvent) {
-        logger.info("Received order : " + messageWithOrderEvent.getPayload().orderID);
-        OrderEvent orderEvent = messageWithOrderEvent.getPayload();
-        Optional<TracingMetadata> optionalTracingMetadata = TracingMetadata.fromMessage(messageWithOrderEvent);
-        if (optionalTracingMetadata.isPresent()) {
-            TracingMetadata tracingMetadata = optionalTracingMetadata.get();
-            Context context = tracingMetadata.getCurrentContext();
-            try (Scope scope = context.makeCurrent()) {
-                createProcessedOrderEventSpan(orderEvent, context);
-                switch (orderEvent.getType()) {
-                    case OrderEvent.ORDER_CREATED_TYPE:
-                        processOrderCreatedEvent(orderEvent);
-                        break;
-                    case OrderEvent.ORDER_UPDATED_TYPE:
-                        logger.info("Receive order update " + orderEvent.status);
-                        compensateOrder(orderEvent.orderID);
-                        break;
-                    default:
-                        break;
-                }
-            }
+    public CompletionStage<Void> processOrder(Message<OrderEvent> message) {
+        OrderEvent orderEvent = message.getPayload();
+        logger.info("Received order: " + orderEvent.orderID);
+        Optional<TracingMetadata> tracingMetadata = TracingMetadata.fromMessage(message);
+
+        if (!tracingMetadata.isPresent()) {
+            return message.ack();
         }
-        return messageWithOrderEvent.ack();
+
+        TracingMetadata metadata = tracingMetadata.get();
+        Context context = metadata.getCurrentContext();
+
+        try (Scope scope = context.makeCurrent()) {
+            createProcessedOrderEventSpan(orderEvent, context);
+            handleOrderEvent(orderEvent);
+        }
+
+        return message.ack();
     }
 
-    private void createProcessedOrderEventSpan(final OrderEvent orderEvent, final Context context) {
-        final String spanName = MessageFormat.format("processed event[{0}]", orderEvent.getType());
-        final SpanBuilder spanBuilder = TRACER.spanBuilder(spanName).setParent(context);
-        final Span span = spanBuilder.startSpan();
-        final ObjectWriter ow = new ObjectMapper().writer().withDefaultPrettyPrinter();
+    private void handleOrderEvent(OrderEvent orderEvent) {
+        switch (orderEvent.getType()) {
+            case OrderEvent.ORDER_CREATED_TYPE:
+                processOrderCreatedEvent(orderEvent);
+                break;
+            case OrderEvent.ORDER_UPDATED_TYPE:
+                logger.info("Receive order update " + orderEvent.status);
+                compensateOrder(orderEvent.orderID);
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void createProcessedOrderEventSpan(OrderEvent orderEvent, Context context) {
+        String spanName = String.format("processed event [%s]", orderEvent.getType());
+        SpanBuilder spanBuilder = TRACER.spanBuilder(spanName).setParent(context);
+        Span span = spanBuilder.startSpan();
+        ObjectWriter objectWriter = new ObjectMapper().writer().withDefaultPrettyPrinter();
+
         try {
-            final String orderEventJson = ow.writeValueAsString(orderEvent);
+            String orderEventJson = objectWriter.writeValueAsString(orderEvent);
             span.setAttribute("processed.event", orderEventJson);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
@@ -103,6 +113,7 @@ public class OrderAgent {
         }
         return null;
     }
+
 
     public void compensateOrder(String oid) {
         repo.cleanTransaction(oid);
